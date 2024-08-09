@@ -1,53 +1,76 @@
-
-
+include("functions.jl")
 using DataFrames, Arrow, Dates
+using Base.Threads
 
-
+file_polytope92cov = parse.(Float64, readlines("polytope92cov.txt")[1:end])
+polytope92cov = [[file_polytope92cov[i], file_polytope92cov[i+1], file_polytope92cov[i+2]] for i in 1:3:length(file_polytope92cov)]
+polytope92cov = order_polytope(polytope92cov)
 
 # Initialize the CriticalRadius column with NaN values
 
-batch_size = 3000
-num_batches=3
+batch_size = 1000
+num_batches = 30
 
-# Define the initial DataFrame structure
-df = DataFrame(State = Matrix{ComplexF64}[], 
-               Separable = Bool[], 
-               Local = Bool[], 
-               PolytopeBin = Union{Vector{Int}, Nothing}[], 
-               Polytope = Union{Vector{Vector{Float64}}, Nothing}[])
+# annealing settings
+initial_temp = 2500
+cooling_rate = 0.97
+max_iter = 300
+
+#initial_temp = 2000
+#cooling_rate = 0.98
+#max_iter = 1000
+
 
 function create_row(polytope)
-    rho=rho_Bures(4)
-    #This variable tells if the state is separable
-    separable_bool=is_separable(rho)
+    rho = rho_Bures(4)
+    # This variable tells if the state is separable
+    separable_bool = is_separable(rho)
     if separable_bool
-        local_bool=true
-        optimal_polytope_bin=nothing
-        optimal_polytope=nothing
+        local_bool = true
+        optimal_polytope_bin = nothing
+        optimal_polytope = nothing
     else
-        optimal_polytope_bin,optimal_polytope,local_bool=OptimizePolytope(rho,polytope)
+        optimal_polytope_bin, optimal_polytope, local_bool = OptimizePolytope(rho, polytope, initial_temp, cooling_rate, max_iter)
     end
     return (State = rho, 
-    Separable = separable_bool, 
-    Local = local_bool, 
-    PolytopeBin = optimal_polytope_bin, 
-    Polytope = optimal_polytope)
+            Separable = separable_bool, 
+            Local = local_bool, 
+            PolytopeBin = optimal_polytope_bin, 
+            Polytope = optimal_polytope)
 end
 
-function generate_batch(batch)    
+function process_row(i, batch, polytope, df)
+    try
+        new_row = create_row(polytope)
+        df.State[i] = new_row.State
+        df.Separable[i] = new_row.Separable
+        df.Local[i] = new_row.Local
+        df.PolytopeBin[i] = new_row.PolytopeBin
+        df.Polytope[i] = new_row.Polytope
+    catch e
+        println("Error processing row $i, batch $batch: ", e)
+        # Print the detailed stack trace
+        Base.showerror(stderr, e)
+        println(stderr, catch_backtrace())
+    end
+end
+
+function generate_batch(batch, polytope)
+    # Define the DataFrame structure with preallocated rows
+    df = DataFrame(State = Union{Matrix{ComplexF64}, Missing}[missing for _ in 1:batch_size], 
+                   Separable = Union{Bool, Missing}[missing for _ in 1:batch_size], 
+                   Local = Union{Bool, Missing}[missing for _ in 1:batch_size], 
+                   PolytopeBin = Union{Vector{Int}, Nothing, Missing}[missing for _ in 1:batch_size], 
+                   Polytope = Union{Vector{Vector{Float64}}, Nothing, Missing}[missing for _ in 1:batch_size])
+    
     tasks = []
     start_time = Dates.now()  # Start time for the batch
 
     for i in 1:batch_size
-        task = Threads.@spawn begin
-            try
-                new_row=create_row(polytope)
-                push!(results_df, new_row)
-            catch e
-                println("Error processing row $i, batch $batch: ", e)
-            end
+        let i = i  # Capture `i` for the closure
+            task = Threads.@spawn process_row(i, batch, polytope, df)
+            push!(tasks, task)
         end
-        push!(tasks, task)
     end
 
     # Wait for all tasks to complete
@@ -57,7 +80,7 @@ function generate_batch(batch)
 
     end_time = Dates.now()  # End time for the batch
     elapsed_time = end_time - start_time
-    print("Batch $batch took (Dates.value($elapsed_time)/1000) seconds to complete.\n")
+    println("Batch $batch took $(Dates.value(elapsed_time) / 1000) seconds to complete.\n")
 
     # Save the DataFrame
     Arrow.write("dataset_b$batch", df)
@@ -67,8 +90,8 @@ function generate_batch(batch)
 end
 
 for batch in 1:num_batches
-    print("Starting to process $batch")
+    println("Starting to process $batch")
 
     # Process the batch
-    generate_batch( batch)
+    generate_batch(batch, polytope92cov)
 end
