@@ -1,0 +1,44 @@
+
+#!/bin/bash
+
+### Email pra ser avisado do inicio e fim do processo
+#PBS -M a201381@dac.unicamp.br
+#PBS -m abe
+
+### Nome do processo e dos arquivos de saida 
+### (cuidado: se ja existe com o mesmo nome, serão substituidos)
+#PBS -N steering_1
+#PBS -e steering_1.err
+#PBS -o steering_1.out
+
+### Escolha a fila, numero de nos e de cores por no
+### https://sites.ifi.unicamp.br/cluster-planck/filas-de-processamento/filas-atuais/
+#PBS -q par36
+#PBS -l nodes=3:ppn=12
+
+
+module load gcc/8.2.0
+export PATH=$PATH:/home/sw/masternode2/cmake/install/bin
+
+. /etc/profile.d/modules.sh
+
+source /home/sw/intel/bin/compilervars.sh intel64
+source /home/sw/intel/composer_xe_2015/mkl/bin/mklvars.sh intel64
+. /home/sw/intel/impi/5.1.2.150/bin64/mpivars.sh
+export INTEL_LICENSE_FILE=/opt/intel/composerxe-2011.0.084/licenses:/opt/intel/licenses:/home/cc/fandri/intel/licenses:/opt/intel/composer_xe_2011_sp1.6.233/licenses:/opt/intel/licenses:/home/cc/fandri/intel/licenses
+
+export I_MPI_HYDRA_BOOTSTRAP=rsh
+export I_MPI_DEVICE=rdssm
+export I_MPI_HYDRA_BOOTSTRAP_EXEC=/opt/pbs/bin/pbs_tmrsh
+
+# Load the Julia module
+export PATH=$PATH:/home/sw/masternode2/julia/julia-1.10.4/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/sw/masternode2/julia/julia-1.10.4/lib
+
+#Set threads number
+export JULIA_NUM_THREADS=36
+
+export MOSEKLM_LICENSE_FILE=/home/des01/rabelo/arthurdo/Julia/mosek.lic
+
+cd $PBS_O_WORKDIR
+julia generate_dataset.jl
