@@ -409,7 +409,7 @@ function order_polytope(polytope)
     # Fill the ordered_vectors list
     for i in 1:n
         ordered_vectors[i] = order[i]
-        ordered_vectors[end+1-i] = -order[i]
+        ordered_vectors[n + i] = -order[i]
     end
     
     return ordered_vectors
@@ -443,13 +443,12 @@ function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,ful
         # Decrease the temperature according to the cooling schedule
         current_temp *= cooling_rate
 
-        
+        # Print current state
+        println("Iteration $i, Temperature $current_temp, Best Value $best_value")
         if sum(current_value)<=8
-            println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
             return best_solution, best_value
         end
     end
-    println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
     return best_solution, best_value
 end
 
