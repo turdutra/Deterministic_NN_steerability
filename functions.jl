@@ -470,11 +470,11 @@ end
 function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
     R=critical_radius(rho,polytope)
 
-    if R<=1
+    if R/shrinking_factor(polytope)<1
         local_bool=false
         best_solution, best_value=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope92cov,rho)
 
-    elseif R/shrinking_factor(polytope)>=1
+    elseif R>=1
         local_bool=true
         best_solution, best_value=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope92cov,rho)
 
@@ -484,4 +484,5 @@ function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
     best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
     return best_solution, best_polytope, local_bool
 end
+
 
