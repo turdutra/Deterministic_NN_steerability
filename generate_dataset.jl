@@ -8,8 +8,8 @@ polytope92cov = order_polytope(polytope92cov)
 
 # Initialize the CriticalRadius column with NaN values
 
-batch_size = 1
-num_batches = 1
+batch_size = 1000
+num_batches = 50
 
 # annealing settings
 initial_temp = 2500

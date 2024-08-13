@@ -499,10 +499,10 @@ function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
         best_solution, best_value=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope,rho)
 
     else
-        return nothing, nothing, nothing, inner_radius, outer_radius
+        return nothing, nothing, missing, inner_radius, outer_radius
     end
     best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
-    
+
     return best_solution, best_polytope, local_bool,inner_radius,outer_radius
 end
 
