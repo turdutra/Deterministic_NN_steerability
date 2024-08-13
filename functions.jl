@@ -236,10 +236,10 @@ function is_separable(rho)
     w = eigs.values
 
     # PPT Criterion: Are all eigenvalues >= 0?
-    ppt = all(real(w) .>= 0)
+    ppt = all(w .>= 0)
     return ppt
 end
-
+###
 
 
 
@@ -376,28 +376,65 @@ function rho_Bures(n::Int)
 end
 
 
-# Helper function to check if two vectors are approximately equal
-approx_equal(v1, v2; atol=1e-6) = all(abs.(v1 .- v2) .< atol)
+function rho_HS(n::Int)
+    """
+    Generate a random mixed density matrix (Hilbert-Schmidt metric)
+    Input: n = dimension of the density matrix (integer)
+    Output: density matrix as a complex array
+    """
+
+    # Create a random Ginibre matrix using the pre-defined G_matrix function
+    G = G_matrix(n, n)
+    
+    # Construct the density matrix
+    rho = G * G'
+    
+    # Normalize the density matrix
+    rho /= tr(rho)
+    
+    return rho
+end
+
+
 
 function order_polytope(polytope)
-    n = length(polytope) Ã· 2
-    unique_vectors = Vector{typeof(polytope[1])}()
+    # Calculate n from the length of the list
+    n = length(polytope) ÷ 2
     
-    for vec in polytope
-        if !any(approx_equal(-vec, v) for v in unique_vectors)
-            push!(unique_vectors, vec)
-        end
+    # Initialize the order list
+    order = Vector{typeof(polytope[1])}()
+    
+    # Function to check if two vectors are approximately equal
+    function are_approximately_equal(v1, v2; atol=1e-6)
+        return all(abs.(v1 .- v2) .< atol)
     end
     
-    if length(unique_vectors) != n
+    # Loop through each vector in the list
+    for vec in polytope
+        # Check if its opposite is already in the order list
+        opposite_in_order = any(v -> are_approximately_equal(v, -vec), order)
+        
+        # If the opposite is not in the order list, append the vector to the order list
+        if !opposite_in_order
+            push!(order, vec)
+        end
+    end
+    # Check if the order list has the correct number of vectors
+    if length(order) != n
         error("The input polytope does not have inversion symmetry.")
     end
     
-    ordered_vectors = vcat(unique_vectors, -reverse(unique_vectors))
+    # Create the ordered_vectors list
+    ordered_vectors = Vector{typeof(polytope[1])}(undef, 2n)
+    
+    # Fill the ordered_vectors list
+    for i in 1:n
+        ordered_vectors[i] = order[i]
+        ordered_vectors[end+1-i] = -order[i]
+    end
     
     return ordered_vectors
 end
-
 
 
 function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,full_polytope,rho)
@@ -427,12 +464,13 @@ function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,ful
         # Decrease the temperature according to the cooling schedule
         current_temp *= cooling_rate
 
-        # Print current state
-        println("Iteration $i, Temperature $current_temp, Best Value $best_value")
+        
         if sum(current_value)<=8
+            println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
             return best_solution, best_value
         end
     end
+    println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
     return best_solution, best_value
 end
 
@@ -468,21 +506,22 @@ function objective_local(x,full_polytope,rho)
 end
 
 function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
-    R=critical_radius(rho,polytope)
+    inner_radius = critical_radius(rho,polytope)
+    outer_radius = inner_radius/shrinking_factor(polytope)
 
-    if R/shrinking_factor(polytope)<1
+    if outer_radius<1
         local_bool=false
+    inner_radius = critical_radius(rho,polytope)
         best_solution, best_value=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope92cov,rho)
 
-    elseif R>=1
+    elseif inner_radius>=1
         local_bool=true
         best_solution, best_value=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope92cov,rho)
 
     else
-        return nothing, nothing, nothing
+        return nothing, nothing, nothing,nothing,nothing
     end
     best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
-    return best_solution, best_polytope, local_bool
+    return best_solution, best_polytope, local_bool,inner_radius,outer_radius
 end
-
 

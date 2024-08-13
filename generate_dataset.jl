@@ -9,7 +9,7 @@ polytope92cov = order_polytope(polytope92cov)
 # Initialize the CriticalRadius column with NaN values
 
 batch_size = 1000
-num_batches = 30
+num_batches = 50
 
 # annealing settings
 initial_temp = 2500
@@ -29,14 +29,18 @@ function create_row(polytope)
         local_bool = true
         optimal_polytope_bin = nothing
         optimal_polytope = nothing
+        inner_radius = nothing
+        outer_radius = nothing
     else
-        optimal_polytope_bin, optimal_polytope, local_bool = OptimizePolytope(rho, polytope, initial_temp, cooling_rate, max_iter)
+        optimal_polytope_bin, optimal_polytope, local_bool,inner_radius,outer_radius = OptimizePolytope(rho, polytope, initial_temp, cooling_rate, max_iter)
     end
     return (State = rho, 
             Separable = separable_bool, 
             Local = local_bool, 
             PolytopeBin = optimal_polytope_bin, 
-            Polytope = optimal_polytope)
+            Polytope = optimal_polytope,
+            InnerRadius = inner_radius, 
+            OuterRadius = outer_radius)
 end
 
 function process_row(i, batch, polytope, df)
@@ -47,6 +51,8 @@ function process_row(i, batch, polytope, df)
         df.Local[i] = new_row.Local
         df.PolytopeBin[i] = new_row.PolytopeBin
         df.Polytope[i] = new_row.Polytope
+        df.InnerRadius[i] = new_row.InnerRadius
+        df.OuterRadius[i] = new_row.OuterRadius
     catch e
         println("Error processing row $i, batch $batch: ", e)
         # Print the detailed stack trace
@@ -61,7 +67,11 @@ function generate_batch(batch, polytope)
                    Separable = Union{Bool, Missing}[missing for _ in 1:batch_size], 
                    Local = Union{Bool, Missing}[missing for _ in 1:batch_size], 
                    PolytopeBin = Union{Vector{Int}, Nothing, Missing}[missing for _ in 1:batch_size], 
-                   Polytope = Union{Vector{Vector{Float64}}, Nothing, Missing}[missing for _ in 1:batch_size])
+                   Polytope = Union{Vector{Vector{Float64}}, Nothing, Missing}[missing for _ in 1:batch_size],
+                   InnerRadius = Union{Float64, Nothing, Missing}[missing for _ in 1:batch_size], 
+                   OuterRadius = Union{Float64, Nothing, Missing}[missing for _ in 1:batch_size])
+                   
+                   
     
     tasks = []
     start_time = Dates.now()  # Start time for the batch
@@ -77,7 +87,7 @@ function generate_batch(batch, polytope)
     for task in tasks
         fetch(task)
     end
-
+    first(df,1)
     end_time = Dates.now()  # End time for the batch
     elapsed_time = end_time - start_time
     println("Batch $batch took $(Dates.value(elapsed_time) / 1000) seconds to complete.\n")
