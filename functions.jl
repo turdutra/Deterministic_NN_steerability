@@ -236,7 +236,7 @@ function is_separable(rho)
     w = eigs.values
 
     # PPT Criterion: Are all eigenvalues >= 0?
-    ppt = all(w .>= 0)
+    ppt = all(real(w) .>= 0)
     return ppt
 end
 ###
@@ -397,45 +397,26 @@ end
 
 
 
+# Helper function to check if two vectors are approximately equal
+approx_equal(v1, v2; atol=1e-6) = all(abs.(v1 .- v2) .< atol)
 function order_polytope(polytope)
-    # Calculate n from the length of the list
     n = length(polytope) ÷ 2
-    
-    # Initialize the order list
-    order = Vector{typeof(polytope[1])}()
-    
-    # Function to check if two vectors are approximately equal
-    function are_approximately_equal(v1, v2; atol=1e-6)
-        return all(abs.(v1 .- v2) .< atol)
-    end
-    
-    # Loop through each vector in the list
+    unique_vectors = Vector{typeof(polytope[1])}()
+
     for vec in polytope
-        # Check if its opposite is already in the order list
-        opposite_in_order = any(v -> are_approximately_equal(v, -vec), order)
-        
-        # If the opposite is not in the order list, append the vector to the order list
-        if !opposite_in_order
-            push!(order, vec)
+        if !any(approx_equal(-vec, v) for v in unique_vectors)
+            push!(unique_vectors, vec)
         end
     end
-    # Check if the order list has the correct number of vectors
-    if length(order) != n
+
+    if length(unique_vectors) != n
         error("The input polytope does not have inversion symmetry.")
     end
-    
-    # Create the ordered_vectors list
-    ordered_vectors = Vector{typeof(polytope[1])}(undef, 2n)
-    
-    # Fill the ordered_vectors list
-    for i in 1:n
-        ordered_vectors[i] = order[i]
-        ordered_vectors[end+1-i] = -order[i]
-    end
-    
+
+    ordered_vectors = vcat(unique_vectors, -reverse(unique_vectors))
+
     return ordered_vectors
 end
-
 
 function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,full_polytope,rho)
     current_solution = zeros(Int(length(full_polytope)/2))
@@ -484,7 +465,7 @@ end
 function objective_steer(x,full_polytope,rho)
     sub_polytope = vcat([full_polytope[i] for i in 1:length(x) if x[i] == 1],[full_polytope[end+1-i] for i in 1:length(x) if x[i] == 1])
     R=critical_radius(rho,sub_polytope)
-    if R==0
+    if R==0 || sum(x)<2
         return 50*length(x)
     elseif R <= 1
         return 2*sum(x)
@@ -496,9 +477,9 @@ end
 function objective_local(x,full_polytope,rho)
     sub_polytope = vcat([full_polytope[i] for i in 1:length(x) if x[i] == 1],[full_polytope[end+1-i] for i in 1:length(x) if x[i] == 1])
     R=critical_radius(rho,sub_polytope)
-    if R==0
+    if R==0 || sum(x)<2
         return 50*length(x)
-    elseif R/shrinking_factor(sub_polytope)>=1
+    elseif R/shrinking_factor(sub_polytope)>1
         return 2*sum(x)
     else
         return 2*length(x)+(1-R)
@@ -511,17 +492,17 @@ function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
 
     if outer_radius<1
         local_bool=false
-    inner_radius = critical_radius(rho,polytope)
-        best_solution, best_value=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope92cov,rho)
+        best_solution, best_value=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope,rho)
 
     elseif inner_radius>=1
         local_bool=true
-        best_solution, best_value=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope92cov,rho)
+        best_solution, best_value=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope,rho)
 
     else
-        return nothing, nothing, nothing,nothing,nothing
+        return nothing, nothing, nothing, inner_radius, outer_radius
     end
     best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
+    
     return best_solution, best_polytope, local_bool,inner_radius,outer_radius
 end
 

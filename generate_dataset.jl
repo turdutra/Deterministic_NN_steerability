@@ -8,8 +8,8 @@ polytope92cov = order_polytope(polytope92cov)
 
 # Initialize the CriticalRadius column with NaN values
 
-batch_size = 1000
-num_batches = 50
+batch_size = 1
+num_batches = 1
 
 # annealing settings
 initial_temp = 2500
@@ -44,21 +44,16 @@ function create_row(polytope)
 end
 
 function process_row(i, batch, polytope, df)
-    try
-        new_row = create_row(polytope)
-        df.State[i] = new_row.State
-        df.Separable[i] = new_row.Separable
-        df.Local[i] = new_row.Local
-        df.PolytopeBin[i] = new_row.PolytopeBin
-        df.Polytope[i] = new_row.Polytope
-        df.InnerRadius[i] = new_row.InnerRadius
-        df.OuterRadius[i] = new_row.OuterRadius
-    catch e
-        println("Error processing row $i, batch $batch: ", e)
-        # Print the detailed stack trace
-        Base.showerror(stderr, e)
-        println(stderr, catch_backtrace())
-    end
+
+    new_row = create_row(polytope)
+    df.State[i] = new_row.State
+    df.Separable[i] = new_row.Separable
+    df.Local[i] = new_row.Local
+    df.PolytopeBin[i] = new_row.PolytopeBin
+    df.Polytope[i] = new_row.Polytope
+    df.InnerRadius[i] = new_row.InnerRadius
+    df.OuterRadius[i] = new_row.OuterRadius
+
 end
 
 function generate_batch(batch, polytope)
@@ -87,7 +82,6 @@ function generate_batch(batch, polytope)
     for task in tasks
         fetch(task)
     end
-    first(df,1)
     end_time = Dates.now()  # End time for the batch
     elapsed_time = end_time - start_time
     println("Batch $batch took $(Dates.value(elapsed_time) / 1000) seconds to complete.\n")
