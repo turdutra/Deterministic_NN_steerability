@@ -8,8 +8,8 @@ polytope92cov = order_polytope(polytope92cov)
 
 # Initialize the CriticalRadius column with NaN values
 
-batch_size = 30
-num_batches = 1
+batch_size = 500
+num_batches = 20
 
 # annealing settings
 initial_temp = 1
@@ -54,7 +54,7 @@ function process_row(polytope, result_channel)
             OuterRadius = new_row.OuterRadius
         ))
     catch e
-        println("Error processing row $i, batch $batch: ", e)
+        println("Error", e)
         # Print the detailed stack trace
         Base.showerror(stderr, e)
         println(stderr, catch_backtrace())

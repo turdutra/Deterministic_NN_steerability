@@ -490,7 +490,7 @@ function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
     else
         return nothing, nothing, missing, inner_radius, outer_radius
     end
-    if best_solution == missing
+    if best_solution === missing
         best_polytope = missing
     else
         best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
