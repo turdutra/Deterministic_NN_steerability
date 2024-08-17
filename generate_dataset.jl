@@ -8,16 +8,13 @@ polytope92cov = order_polytope(polytope92cov)
 
 # Initialize the CriticalRadius column with NaN values
 
-batch_size = 1000
-num_batches = 50
+batch_size = 30
+num_batches = 1
 
 # annealing settings
-initial_temp = 2500
-cooling_rate = 0.97
-max_iter = 300
-
-#initial_temp = 2000
-#cooling_rate = 0.98
+initial_temp = 1
+cooling_rate = 0.997
+max_iter = 1000
 #max_iter = 1000
 
 
@@ -43,39 +40,36 @@ function create_row(polytope)
             OuterRadius = outer_radius)
 end
 
-function process_row(i, batch, polytope, df)
+function process_row(polytope, result_channel)
 
-    new_row = create_row(polytope)
-    df.State[i] = new_row.State
-    df.Separable[i] = new_row.Separable
-    df.Local[i] = new_row.Local
-    df.PolytopeBin[i] = new_row.PolytopeBin
-    df.Polytope[i] = new_row.Polytope
-    df.InnerRadius[i] = new_row.InnerRadius
-    df.OuterRadius[i] = new_row.OuterRadius
-
-end
-
-function generate_batch(batch, polytope)
-    # Define the DataFrame structure with preallocated rows
-    df = DataFrame(State = Union{Matrix{ComplexF64}, Missing}[missing for _ in 1:batch_size], 
-                   Separable = Union{Bool, Missing}[missing for _ in 1:batch_size], 
-                   Local = Union{Bool, Missing}[missing for _ in 1:batch_size], 
-                   PolytopeBin = Union{Vector{Int}, Nothing, Missing}[missing for _ in 1:batch_size], 
-                   Polytope = Union{Vector{Vector{Float64}}, Nothing, Missing}[missing for _ in 1:batch_size],
-                   InnerRadius = Union{Float64, Nothing, Missing}[missing for _ in 1:batch_size], 
-                   OuterRadius = Union{Float64, Nothing, Missing}[missing for _ in 1:batch_size])
-                   
-                   
+    try
+        new_row = create_row(polytope)
+        put!(result_channel, (
+            State = new_row.State, 
+            Separable = new_row.Separable, 
+            Local = new_row.Local, 
+            PolytopeBin = new_row.PolytopeBin, 
+            Polytope = new_row.Polytope,
+            InnerRadius = new_row.InnerRadius, 
+            OuterRadius = new_row.OuterRadius
+        ))
+    catch e
+        println("Error processing row $i, batch $batch: ", e)
+        # Print the detailed stack trace
+        Base.showerror(stderr, e)
+        println(stderr, catch_backtrace())
+    end
+   
+    end
     
+function generate_batch(batch, polytope,result_channel)
+
     tasks = []
     start_time = Dates.now()  # Start time for the batch
 
     for i in 1:batch_size
-        let i = i  # Capture `i` for the closure
-            task = Threads.@spawn process_row(i, batch, polytope, df)
-            push!(tasks, task)
-        end
+        task = Threads.@spawn process_row(polytope, result_channel)
+        push!(tasks, task)
     end
 
     # Wait for all tasks to complete
@@ -86,16 +80,38 @@ function generate_batch(batch, polytope)
     elapsed_time = end_time - start_time
     println("Batch $batch took $(Dates.value(elapsed_time) / 1000) seconds to complete.\n")
 
+
+    # Initialize an empty DataFrame with the appropriate column types
+    df = DataFrame(
+        State=Vector{Matrix{ComplexF64}}(),                    # State is a vector of complex matrices
+        Separable=Vector{Bool}(),                              # Separable is a vector of Bool
+        Local=Vector{Union{Bool, Missing}}(),                  # Local is a vector that can be Bool or Missing
+        PolytopeBin=Vector{Union{Vector{Bool}, Nothing, Missing}}(),   # PolytopeBin is a vector that can be a binary vector, Nothing, or Missing
+        Polytope=Vector{Union{Vector{Vector{Float64}}, Nothing, Missing}}(),  # Polytope is a vector that can be a vector of vectors, Nothing, or Missing
+        InnerRadius=Vector{Union{Float64, Nothing, Missing}}(),  # InnerRadius is a vector that can be a Float, Nothing, or Missing
+        OuterRadius=Vector{Union{Float64, Nothing, Missing}}()   # OuterRadius is a vector that can be a Float, Nothing, or Missing
+    )
+    # Consume the channel and populate the DataFrame
+    for _ in 1:batch_size
+        new_row = take!(result_channel)
+        push!(df, new_row)
+    end
+
     # Save the DataFrame
+    println("Saving DataFrame for batch $batch")
     Arrow.write("dataset_b$batch", df)
+
+    # Clear the channel
+    close(result_channel)
 
     # Call garbage collector
     GC.gc()
 end
 
 for batch in 1:num_batches
+    result_channel = Channel{NamedTuple}(batch_size)
     println("Starting to process $batch")
 
     # Process the batch
-    generate_batch(batch, polytope92cov)
+    generate_batch(batch, polytope92cov,result_channel)
 end

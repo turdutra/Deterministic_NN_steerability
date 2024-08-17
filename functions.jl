@@ -17,7 +17,7 @@ Base.show(io::IO, f::Float64) = @printf(io, "%1.4f", f)
 
 
 ### Some useful objects
-Pauli_matrices = [[0 1; 1 0], [0 -im; im 0], [1 0; 0 -1]]
+Pauli_matrix = [[0 1; 1 0], [0 -im; im 0], [1 0; 0 -1]]
 Hadamard = [1 1; 1 -1]/sqrt(2)
 phase_gate(phi) = [1 0; 0 exp(im*phi)]
 ###
@@ -140,91 +140,57 @@ end
 
 
 ### Useful functions when dealing with qubits
-
-#To specify a projective measurement for a qubit, it is only necessary to specify a bloch vector. This function transforms the bloch vector in the actual projector.
-function vector_to_hermitian(measurement_vectors::AbstractMatrix)
-    N = size(measurement_vectors)[1]
-    vectors_dot_sigma = [sum(measurement_vectors[i,j]*Pauli_matrices[j] for j in 1:3) for i in 1:N]
-    projectors = [(LinearAlgebra.I(2) + vectors_dot_sigma[i])/2 for i in 1:N]
-    return projectors
-end
-
-function vector_to_hermitian(measurement_vectors::AbstractVector)
-    N = length(measurement_vectors)
-    vectors_dot_sigma = [sum(measurement_vectors[i][j]*Pauli_matrices[j] for j in 1:3) for i in 1:N]
-    projectors = [(LinearAlgebra.I(2) + vectors_dot_sigma[i])/2 for i in 1:N]
-    return projectors
-end
-
-#Transforms a bloch vector into its corresponding ket state (in the computational basis)
-function bloch_vector_to_ket(vector)
-    theta = acos(vector[3])
-    phi = atan(vector[2], vector[1])
-    return [cos(theta/2), exp(im*phi)*sin(theta/2)]
-end
-
-#To specify a dichotomic measurement, it is only necessary to specify one of the measurement operators. The following function constructs the whole measurements
-function all_measurement_elements(finite_measurements)
-    n_measurements = size(finite_measurements)[1]
-    measurement_elements = [finite_measurements[1]]
-	for i=2:2*n_measurements
-		if iseven(i)
-			push!(measurement_elements, LinearAlgebra.I(2)- measurement_elements[i-1])
-		else
-			push!(measurement_elements, finite_measurements[1+floor(Int64, i/2)])
-		end
-	end
-    return measurement_elements
-end
+gate_hadamard() = [1 1; 1 -1]/sqrt(2)
+gate_phase(phi) = [1 0; 0 exp(im*phi)]
 
 #Computes the unitary corresponding to a rotation in the Bloch sphere (see https://en.wikipedia.org/wiki/Euler_angles and https://qubit.guide/2.12-composition-of-rotations)
-function rotation_to_unitary(rotation_matrix)
-    phi = acos(rotation_matrix[3,3])
+function rotation2unitary(R::AbstractMatrix{<:Real})
+    phi = acos(R[3,3])
     if phi == 0
-        alpha = atan(-rotation_matrix[1,2], rotation_matrix[1,1])
+        alpha = atan(-R[1,2], R[1,1])
         beta = 0
     else
-        alpha = atan(rotation_matrix[1, 3], -rotation_matrix[2, 3])
-        beta = atan(rotation_matrix[3, 1], rotation_matrix[3, 2])
+        alpha = atan(R[1, 3], -R[2, 3])
+        beta = atan(R[3, 1], R[3, 2])
     end
-    return phase_gate(alpha)*Hadamard*phase_gate(phi)*Hadamard*phase_gate(beta)
+    return gate_phase(alpha)*gate_hadamard()*gate_phase(phi)*gate_hadamard()*gate_phase(beta)
 end
-
-
-
 
 #Writes a given state in its canonical form
-function canonical_form(input_state; kill_Bobs_marginal = true)
-    if kill_Bobs_marginal
-        rho_B = partial_trace(input_state, [2, 2], 1)
-        map = LinearAlgebra.sqrt(LinearAlgebra.inv(rho_B))
-        input_state = kron(LinearAlgebra.I(2), map)*input_state*kron(LinearAlgebra.I(2), map)
-        input_state = input_state/LinearAlgebra.tr(input_state)
+function canonical_form!(rho::AbstractMatrix, mixBobsmarg::Bool = true)
+    if mixBobsmarg
+        map = sqrt(inv(partial_trace(rho, [2, 2], 1)))
+        rho = kron(I(2), map)*rho*kron(I(2), map)
+        parent(rho) ./= tr(rho)
     end
-    T = real.([LinearAlgebra.tr(input_state*kron(Pauli_matrices[i], Pauli_matrices[j])) for i in 1:3, j in 1:3])
-    if LinearAlgebra.Diagonal(T) == T
-        return input_state
-    else
-        U, S, V = LinearAlgebra.svd(T)
-        if LinearAlgebra.det(U) < 0
-            U = -U
-        end
-        if LinearAlgebra.det(V) < 0
-            V = -V
-        end
-        U_A = rotation_to_unitary(U')
-        U_B = rotation_to_unitary(V')
+    T = real.([tr(rho*kron(Pauli_matrix[i], Pauli_matrix[j])) for i in 1:3, j in 1:3])
+    
+    (Diagonal(T) == T) && return rho
+    
+    U, _, V = svd(T)
+    if det(U) < 0
+        U = -U
+    end
+    if det(V) < 0
+         V = -V
+    end
+    Ua = rotation2unitary(U')
+    Ub = rotation2unitary(V')
 
-        return kron(U_A, U_B)*input_state*kron(U_A', U_B')
-    end
+    rho = kron(Ua, Ub)*rho*kron(Ua', Ub')
+    return rho
 end
 
+function canonical_form(rho::AbstractMatrix, mixBobsmarg = true)
+    return canonical_form!(copy(rho), mixBobsmarg)
+end
 
-#Generates a random unit vector
-function random_unit_vectors(n; dims = 3)
-	vector = [randn(dims) for i in 1:n]
-	normalized_vectors = [vector[i]/LinearAlgebra.norm(vector[i]) for i in 1:n]
-	return normalized_vectors
+function bloch_vec(A::AbstractMatrix)
+    !(A ≈ A') && throw(ArgumentError("A is not hermitian, so it cannot be decomposed in the Gell-Mann basis"))
+    !(tr(A) ≈ 1) && throw(ArgumentError("A does not have unit trace, consider using gm_vec instead"))
+    d = size(A)[1]
+    gm = gell_mann(d)
+    return [Real(tr(gm[i]*A)) for i in 2:d^2]
 end
 
 
@@ -268,66 +234,65 @@ end
 ### Preliminary functions for Chau's method
 
 #Given three points in 3d, returns the plane that passes through them
-function three_points_to_plane(points)
-    a_vec = points[2] - points[1]
-    b_vec = points[3] - points[1]
-    normal_vector = LinearAlgebra.cross(a_vec, b_vec)
-    offset = LinearAlgebra.dot(points[1], normal_vector)
-    return normal_vector, offset
+function plane(points::Vector{<:Vector{<:Real}})
+    a = points[2] - points[1]
+    b = points[3] - points[1]
+    normal = cross(a, b)
+    offset = dot(points[1], normal)
+    return normal, offset
 end
 
 #Given a finite set of points, returns all triples composed of such points
-function all_triples(points)
-    n_points = size(points)[1]
-    triples = []
-    for i=1:(n_points-2)
-        for j in (i+1):(n_points-1)
-            for k in (j+1):n_points
-                push!(triples, [points[i], points[j], points[k]])
+function all_triples(points::AbstractVector{T}) where {T}
+    n = length(points)
+    triples = Vector{Vector{T}}(undef, binomial(n,3))
+    count = 1
+    for i=1:(n-2)
+        for j in (i+1):(n-1)
+            for k in (j+1):n
+                triples[count] = [points[i], points[j], points[k]]
+                count += 1
             end
         end
     end
     return triples
 end
 
+
 #Given a finite set of points in 3d, all_planes gets all the planes that pass through at least three of those points
-function all_planes(polytope_vertices)
-    triples = all_triples(polytope_vertices)
-    normal_vectors = []
-    offsets = []
-    for i = 1:size(triples)[1]
-        new_vec, new_offset = three_points_to_plane(triples[i]) 
-        push!(normal_vectors, new_vec)
-        push!(offsets, new_offset)
+function all_planes(points::Vector{Vector{T}}) where {T<:Real}
+    triples = all_triples(points)
+    normals = Vector{Vector{T}}(undef, length(triples))
+    offsets = Vector{T}(undef, length(triples))
+    for i in eachindex(triples)
+        normals[i], offsets[i] = plane(triples[i]) 
     end
-    return normal_vectors, offsets
+    return normals, offsets
 end
 
 #Chau's method
-function critical_radius(input_state, polytope_vertices)
-    normal_vectors, offsets = all_planes(polytope_vertices)
-    n_vertices = size(polytope_vertices)[1]
-    n_normal_vectors = length(offsets)
+function critical_radius(rho::AbstractMatrix, polytope::Vector{<:Vector{<:Real}} )
+    normals, offsets = all_planes(polytope)
 
-    canonical_state = canonical_form(input_state; kill_Bobs_marginal = true)
+    rho_canonical = canonical_form(rho)
 
-    a = real.([LinearAlgebra.tr(Pauli_matrices[i]*partial_trace(canonical_state, [2, 2], 2)) for i in 1:3])
-    T = real.([LinearAlgebra.tr(canonical_state*kron(Pauli_matrices[i], Pauli_matrices[j])) for i in 1:3, j in 1:3])
+    a = real.([tr(Pauli_matrix[i]*partial_trace(rho_canonical, [2, 2], 2)) for i in 1:3])
+    T = real.([tr(rho_canonical*kron(Pauli_matrix[i], Pauli_matrix[j])) for i in 1:3, j in 1:3])
 
     model = Model(Mosek.Optimizer)
     set_silent(model)
 
     r = @variable(model)
-    @variable(model, probs[1:n_vertices] .>= 0)
+    @variable(model, probs[eachindex(polytope)] .>= 0)
 
-    upper_bound_radius = [@expression(model, sum(probs[j]*abs(-offsets[i] + normal_vectors[i]'*polytope_vertices[j])/LinearAlgebra.norm(-offsets[i]*a + T*normal_vectors[i]) for j in 1:n_vertices)) for i in 1:n_normal_vectors]
+    b = [@expression(model, sum(probs[j]*abs(-offsets[i] + normals[i]'*polytope[j])/norm(-offsets[i]*a + T*normals[i]) for j in eachindex(polytope))) for i in eachindex(normals)]
 
-    for i=1:n_normal_vectors
-        @constraint(model, r <= upper_bound_radius[i])
+    for i in eachindex(normals)
+        @constraint(model, r <= b[i])
     end
 
     @constraint(model, sum(probs) == 1)
-    @constraint(model, sum(probs[j]*polytope_vertices[j] for j in 1:n_vertices) .== 0)
+    @constraint(model, sum(probs[j]*polytope[j] for j in eachindex(polytope)) .== 0)
 
     @objective(model, Max, r)
 
@@ -419,13 +384,14 @@ function order_polytope(polytope)
 end
 
 function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,full_polytope,rho)
-    current_solution = zeros(Int(length(full_polytope)/2))
+    current_solution = zeros(Int, Int(length(full_polytope)/2))
+    current_solution[randperm(Int(length(full_polytope)/2))[1:5]] .= 1
     current_temp = initial_temp
-    best_solution = copy(current_solution)
+    best_solution = current_solution
     current_value = objective(current_solution,full_polytope,rho)
     best_value = current_value
-
     for i in 1:max_iter
+        println("Iteration $i, Temperature $current_temp, Current Value $current_value, Best Value $best_value")
         new_solution = neighbor(current_solution)
         new_value = objective(new_solution,full_polytope,rho)
         delta = new_value - current_value
@@ -446,31 +412,55 @@ function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,ful
         current_temp *= cooling_rate
 
         
-        if sum(current_value)<=8
-            println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
-            return best_solution, best_value
+        if current_value<=10
+            println("Final iteration, Temperature $current_temp, Best Value $best_value")
+            return best_solution
         end
     end
-    println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
-    return best_solution, best_value
+    println("Final iteration Temperature $current_temp, Best Value $best_value")
+    return missing
 end
 
-function neighbor(x)
+function neighbor_legacy(x)
     y = copy(x)
     idx = rand(1:length(x))
     y[idx] = !Bool(y[idx]) % 2
     return y
 end
 
+function neighbor(x)
+
+    # Get indexes of `1` values
+    ones_indices = findall(v -> Bool(v), x)
+
+    # Get indexes of `0` values
+    zeros_indices = findall(v -> !Bool(v), x)
+
+
+    # Ensure there are bits to flip
+    # Flip a `1` to `0`
+    idx1 = rand(ones_indices)
+    x[idx1] = 0
+
+    # Flip a `0` to `1`
+    idx2 = rand(zeros_indices)
+    x[idx2] = 1
+
+    return x
+end
+
+
 function objective_steer(x,full_polytope,rho)
     sub_polytope = vcat([full_polytope[i] for i in 1:length(x) if x[i] == 1],[full_polytope[end+1-i] for i in 1:length(x) if x[i] == 1])
     R=critical_radius(rho,sub_polytope)
     if R==0 || sum(x)<2
-        return 50*length(x)
-    elseif R <= 1
+        return 1000*length(x)
+    end
+    R_out=R/shrinking_factor(sub_polytope)
+    if R_out < 1
         return 2*sum(x)
     else
-        return 2*length(x)+(R-1)
+        return 2*length(x)+(R_out-1)
     end
 end
 
@@ -478,8 +468,8 @@ function objective_local(x,full_polytope,rho)
     sub_polytope = vcat([full_polytope[i] for i in 1:length(x) if x[i] == 1],[full_polytope[end+1-i] for i in 1:length(x) if x[i] == 1])
     R=critical_radius(rho,sub_polytope)
     if R==0 || sum(x)<2
-        return 50*length(x)
-    elseif R/shrinking_factor(sub_polytope)>1
+        return 1000*length(x)
+    elseif R>=1
         return 2*sum(x)
     else
         return 2*length(x)+(1-R)
@@ -489,20 +479,22 @@ end
 function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
     inner_radius = critical_radius(rho,polytope)
     outer_radius = inner_radius/shrinking_factor(polytope)
-
     if outer_radius<1
         local_bool=false
-        best_solution, best_value=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope,rho)
+        best_solution=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope,rho)
 
     elseif inner_radius>=1
         local_bool=true
-        best_solution, best_value=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope,rho)
+        best_solution=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope,rho)
 
     else
         return nothing, nothing, missing, inner_radius, outer_radius
     end
-    best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
-
+    if best_solution == missing
+        best_polytope = missing
+    else
+        best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
+    end
     return best_solution, best_polytope, local_bool,inner_radius,outer_radius
 end
 
