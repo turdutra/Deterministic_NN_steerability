@@ -99,7 +99,8 @@ function generate_batch(batch, polytope,result_channel)
 
     # Save the DataFrame
     println("Saving DataFrame for batch $batch")
-    Arrow.write("dataset_b$batch", df)
+    filename = "dataset_b$(batch)_task$(ENV["SLURM_PROCID"])"
+    Arrow.write(filename, df)Arrow.write("dataset_b$batch", df)
 
     # Clear the channel
     close(result_channel)
