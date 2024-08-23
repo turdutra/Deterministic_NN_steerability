@@ -409,7 +409,6 @@ function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,ful
     current_value = objective(current_solution,full_polytope,rho)
     best_value = current_value
     for i in 1:max_iter
-        println("Iteration $i, Temperature $current_temp, Current Value $current_value, Best Value $best_value")
         new_solution = neighbor(current_solution)
         new_value = objective(new_solution,full_polytope,rho)
         delta = new_value - current_value
