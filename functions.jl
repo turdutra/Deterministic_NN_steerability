@@ -209,6 +209,24 @@ end
 
 
 
+# Função para calcular a negatividade
+function negativity(rho)
+    rho_pt = partial_transpose(rho, [2, 2], 2)
+    eigenvalues = eigen(rho_pt).values
+    negative_eigenvalues = [val for val in eigenvalues if val < 0]
+    return sum(abs, negative_eigenvalues)
+end
+
+# Função para calcular a concorrência
+function concurrence(rho)
+    Y = [0 -im; im 0]
+    rho_tilde = kron(Y, Y) * conj(rho) * kron(Y, Y)
+    R = sqrt(sqrt(rho) * rho_tilde * sqrt(rho))
+    eigenvalues = sort(real(eigen(R).values), rev=true)
+    return max(0, eigenvalues[1] - eigenvalues[2] - eigenvalues[3] - eigenvalues[4])
+end
+
+
 
 ### Useful functions for manipulating polytopes
 
