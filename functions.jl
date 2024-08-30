@@ -401,7 +401,7 @@ function order_polytope(polytope)
     return ordered_vectors
 end
 
-function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,full_polytope,rho)
+function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,full_polytope, adjacency_list,rho)
     current_solution = zeros(Int, Int(length(full_polytope)/2))
     current_solution[randperm(Int(length(full_polytope)/2))[1:5]] .= 1
     current_temp = initial_temp
@@ -409,7 +409,7 @@ function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,ful
     current_value = objective(current_solution,full_polytope,rho)
     best_value = current_value
     for i in 1:max_iter
-        new_solution = neighbor(current_solution)
+        new_solution = neighbor(current_solution, adjacency_list)
         new_value = objective(new_solution,full_polytope,rho)
         delta = new_value - current_value
 
@@ -430,38 +430,30 @@ function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,ful
 
         
         if current_value<=10
-            println("Final iteration, Temperature $current_temp, Best Value $best_value")
+            println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
             return best_solution
         end
     end
-    println("Final iteration Temperature $current_temp, Best Value $best_value")
+    println("Final iteration $max_iter, Temperature $current_temp, Best Value $best_value")
     return missing
 end
 
-function neighbor_legacy(x)
-    y = copy(x)
-    idx = rand(1:length(x))
-    y[idx] = !Bool(y[idx]) % 2
-    return y
-end
 
-function neighbor(x)
-
-    # Get indexes of `1` values
+function neighbor(x, adjacency_list)
     ones_indices = findall(v -> Bool(v), x)
-
-    # Get indexes of `0` values
-    zeros_indices = findall(v -> !Bool(v), x)
-
-
-    # Ensure there are bits to flip
-    # Flip a `1` to `0`
-    idx1 = rand(ones_indices)
+    zero_neighbors=[]
+    idx1=1
+    while isempty(zero_neighbors)
+        # Get indexes of `1` values
+        idx1 = rand(ones_indices)
+        neighbors = adjacency_list[idx1]
+        # Filter neighbors to include only those with x[idx] == 0
+        zero_neighbors = filter(idx -> x[idx] == 0, neighbors)
+    end
+    idx0 = rand(zero_neighbors)
     x[idx1] = 0
-
+    x[idx0] = 1
     # Flip a `0` to `1`
-    idx2 = rand(zeros_indices)
-    x[idx2] = 1
 
     return x
 end
@@ -493,16 +485,16 @@ function objective_local(x,full_polytope,rho)
     end
 end
 
-function OptimizePolytope(rho,polytope,initial_temp,cooling_rate,max_iter)
+function OptimizePolytope(rho,polytope, adjacency_list,initial_temp,cooling_rate,max_iter)
     inner_radius = critical_radius(rho,polytope)
     outer_radius = inner_radius/shrinking_factor(polytope)
     if outer_radius<1
         local_bool=false
-        best_solution=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope,rho)
+        best_solution=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope, adjacency_list,rho)
 
     elseif inner_radius>=1
         local_bool=true
-        best_solution=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope,rho)
+        best_solution=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope, adjacency_list,rho)
 
     else
         return nothing, nothing, missing, inner_radius, outer_radius
