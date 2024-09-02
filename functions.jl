@@ -319,7 +319,20 @@ function critical_radius(rho::AbstractMatrix, polytope::Vector{<:Vector{<:Real}}
     return objective_value(model)
 end
 
-
+function iterated_critical_radius(rho::AbstractMatrix,polytope_list::Vector{<:Vector{<:Vector{<:Real}}})
+    for polytope in polytope_list
+        inner_radius = critical_radius(rho,polytope)
+        outer_radius = inner_radius/shrinking_factor(polytope)
+        if outer_radius<1
+            local_bool=false
+            return local_bool, inner_radius, outer_radius
+        elseif inner_radius>=1
+            local_bool=true
+            return local_bool, inner_radius, outer_radius
+        end            
+    end
+    return missing, missing, missing
+end
 
 
 function G_matrix(n::Int, m::Int)
@@ -506,4 +519,21 @@ function OptimizePolytope(rho,polytope, adjacency_list,initial_temp,cooling_rate
     end
     return best_solution, best_polytope, local_bool,inner_radius,outer_radius
 end
+
+
+function negativity_calc(rho)
+    rho_pt = partial_transpose(rho, [2, 2], 2)
+    eigenvalues = eigen(rho_pt).values
+    negative_eigenvalues = [val for val in eigenvalues if val < 0]
+    return sum(abs, negative_eigenvalues)
+end
+
+function concurrence_calc(rho)
+    Y = [0 -im; im 0]
+    rho_tilde = kron(Y, Y) * conj(rho) * kron(Y, Y)
+    R = sqrt(sqrt(rho) * rho_tilde * sqrt(rho))
+    eigenvalues = sort(real(eigen(R).values), rev=true)
+    return max(0, eigenvalues[1] - eigenvalues[2] - eigenvalues[3] - eigenvalues[4])
+end
+
 
