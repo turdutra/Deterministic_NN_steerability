@@ -5,97 +5,86 @@ using Base.Threads
 
 # Load the Arrow files
 rearranged_vectors_table_92 = Arrow.Table("polytope92cov_rearranged.arrow")
-adjacency_list_table_92 = Arrow.Table("polytope92cov_adjacency.arrow")
 
 # Convert to regular Julia arrays
 rearranged_vectors_92 = collect(rearranged_vectors_table_92.rearranged_vectors)
-adjacency_list_92 = collect(adjacency_list_table_92.adjacency_list)
 
 # Optionally, convert each element to a regular Array for better usability
 polytope92cov = [convert(Vector{Float64}, collect(x)) for x in rearranged_vectors_92]
 
-polytope92cov_adjacency = [collect(x) for x in adjacency_list_92]
-
-# Assuming adjacency_list_92 is already defined as a list of lists
-n = length(adjacency_list_92)  # Total length of the outer list
-
-# Function to shift the indexes in an inner list both to account for python indexes and for our half poytope approach
-function shift_index(idx, n)
-    if (idx+1) > n / 2
-        return n + 1 - (idx+1)
-    else
-        return idx + 1
-    end
-end
-
-# Apply the shift to each index in each inner list
-polytope92cov_adjacency_shifted = [shift_index.(inner_list, n) for inner_list in adjacency_list_92]
 
 
-# Initialize the CriticalRadius column with NaN values
-
-batch_size = 500
-num_batches = 1000
+batch_size = 50
+num_batches = 1
 
 # annealing settings
 initial_temp = 1
 cooling_rate = 0.997
-max_iter = 300
+max_iter = 1300
 #max_iter = 1000
 
 
-function create_row(polytope, adjacency_list)
+function create_row(polytope)
     rho = rho_Bures(4)
     # This variable tells if the state is separable
     separable_bool = is_separable(rho)
     if separable_bool
         local_bool = true
-        optimal_polytope_bin = nothing
+        optimal_polytope_angle = nothing
         optimal_polytope = nothing
         inner_radius = nothing
         outer_radius = nothing
     else
-        optimal_polytope_bin, optimal_polytope, local_bool,inner_radius,outer_radius = OptimizePolytope(rho, polytope, adjacency_list, initial_temp, cooling_rate, max_iter)
-        optimal_polytope, local_bool=OptimizePolytopeFreeVec(rho,initial_temp,cooling_rate,max_iter)
+        optimal_polytope_angle, optimal_polytope, local_bool,inner_radius,outer_radius = OptimizePolytopeFreeVec(rho, polytope, initial_temp, cooling_rate, max_iter)
     end
     return (State = rho, 
             Separable = separable_bool, 
             Local = local_bool, 
-            PolytopeBin = optimal_polytope_bin, 
+            PolytopeAngle = optimal_polytope_angle,
             Polytope = optimal_polytope,
             InnerRadius = inner_radius, 
             OuterRadius = outer_radius)
 end
 
-function process_row(polytope, adjacency_list, result_channel)
+function process_row(result_channel,polytope)
 
-    try
-        new_row = create_row(polytope, adjacency_list)
-        put!(result_channel, (
-            State = new_row.State, 
-            Separable = new_row.Separable, 
-            Local = new_row.Local, 
-            PolytopeBin = new_row.PolytopeBin, 
-            Polytope = new_row.Polytope,
-            InnerRadius = new_row.InnerRadius, 
-            OuterRadius = new_row.OuterRadius
-        ))
-    catch e
-        println("Error", e)
-        # Print the detailed stack trace
-        Base.showerror(stderr, e)
-        println(stderr, catch_backtrace())
-    end
+    new_row = create_row(polytope)
+         put!(result_channel, (
+             State = new_row.State, 
+             Separable = new_row.Separable, 
+             Local = new_row.Local, 
+             PolytopeAngle = new_row.PolytopeAngle,
+             Polytope = new_row.Polytope,
+             InnerRadius = new_row.InnerRadius, 
+             OuterRadius = new_row.OuterRadius
+         ))
+    # try
+    #     new_row = create_row(polytope)
+    #     put!(result_channel, (
+    #         State = new_row.State, 
+    #         Separable = new_row.Separable, 
+    #         Local = new_row.Local, 
+    #         PolytopeAngle = new_row.PolytopeAngle,
+    #         Polytope = new_row.Polytope,
+    #         InnerRadius = new_row.InnerRadius, 
+    #         OuterRadius = new_row.OuterRadius
+    #     ))
+    # catch e
+    #     println("Error", e)
+    #     # Print the detailed stack trace
+    #     Base.showerror(stderr, e)
+    #     println(stderr, catch_backtrace())
+    # end
    
     end
     
-function generate_batch(batch, polytope, adjacency_list ,result_channel)
+function generate_batch(batch ,result_channel,polytope)
 
     tasks = []
     start_time = Dates.now()  # Start time for the batch
 
     for i in 1:batch_size
-        task = Threads.@spawn process_row(polytope, adjacency_list , result_channel)
+        task = Threads.@spawn process_row(result_channel,polytope)
         push!(tasks, task)
     end
 
@@ -113,8 +102,8 @@ function generate_batch(batch, polytope, adjacency_list ,result_channel)
         State=Vector{Matrix{ComplexF64}}(),                    # State is a vector of complex matrices
         Separable=Vector{Bool}(),                              # Separable is a vector of Bool
         Local=Vector{Union{Bool, Missing}}(),                  # Local is a vector that can be Bool or Missing
-        PolytopeBin=Vector{Union{Vector{Bool}, Nothing, Missing}}(),   # PolytopeBin is a vector that can be a binary vector, Nothing, or Missing
-        Polytope=Vector{Union{Vector{Vector{Float64}}, Nothing, Missing}}(),  # Polytope is a vector that can be a vector of vectors, Nothing, or Missing
+        PolytopeAngle=Vector{Union{Vector{Float64}, Nothing, Missing}}(),   # PolytopeBin is a vector that can be a binary vector, Nothing, or Missing
+        Polytope=Vector{Union{Vector{Float64}, Nothing, Missing}}(),  # Polytope is a vector that can be a vector of vectors, Nothing, or Missing
         InnerRadius=Vector{Union{Float64, Nothing, Missing}}(),  # InnerRadius is a vector that can be a Float, Nothing, or Missing
         OuterRadius=Vector{Union{Float64, Nothing, Missing}}()   # OuterRadius is a vector that can be a Float, Nothing, or Missing
     )
@@ -141,5 +130,5 @@ for batch in 1:num_batches
     println("Starting to process $batch")
 
     # Process the batch
-    generate_batch(batch, polytope92cov, polytope92cov_adjacency_shifted,result_channel)
+    generate_batch(batch,result_channel, polytope92cov)
 end

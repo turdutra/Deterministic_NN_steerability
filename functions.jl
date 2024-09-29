@@ -415,40 +415,68 @@ function order_polytope(polytope)
 end
 
 function simulated_annealing(objective, initial_temp, cooling_rate, max_iter,full_polytope, adjacency_list,rho)
+    
     current_solution = zeros(Int, Int(length(full_polytope)/2))
     current_solution[randperm(Int(length(full_polytope)/2))[1:5]] .= 1
+    current_polytope = vcat([full_polytope[i] for i in 1:length(current_solution) if current_solution[i] == 1],[full_polytope[end+1-i] for i in 1:length(current_solution) if current_solution[i] == 1])
+
     current_temp = initial_temp
     best_solution = current_solution
-    current_value = objective(current_solution,full_polytope,rho)
+
+    # o_bool will signal if the objective function of the polytope is considered a success, either detecting steering or non steering
+    current_value, current_o_bool = objective(current_polytope,rho)
     best_value = current_value
-    for i in 1:max_iter
+    best_o_bool = current_o_bool
+    buffer_iteration=0
+    i=0
+
+    while i + buffer_iteration < max_iter 
+        i += 1
+
+        # Generate a new candidate solution
         new_solution = neighbor(current_solution, adjacency_list)
-        new_value = objective(new_solution,full_polytope,rho)
+        new_polytope = vcat(
+            [full_polytope[j] for j in 1:num_elements if new_solution[j] == 1],
+            [full_polytope[end + 1 - j] for j in 1:num_elements if new_solution[j] == 1]
+        )
+
+        new_value, new_o_bool = objective(new_polytope, rho)
         delta = new_value - current_value
 
         # Metropolis criterion for acceptance
         if delta < 0 || rand() < exp(-delta / current_temp)
             current_solution = new_solution
             current_value = new_value
+            current_polytope = new_polytope
+            current_o_bool = new_o_bool
         end
 
         # Update the best solution found so far
         if current_value < best_value
             best_solution = copy(current_solution)
             best_value = current_value
+            best_polytope = current_polytope
+            best_o_bool = current_o_bool
         end
 
         # Decrease the temperature according to the cooling schedule
         current_temp *= cooling_rate
 
-        
-        if current_value<=10
-            println("Final iteration $i, Temperature $current_temp, Best Value $best_value")
-            return best_solution
+        # Check if current_value is below the threshold
+        if best_o_bool && buffer_iteration ==0
+            buffer_iteration = max_iter-i-50
+            println("Threshold value reached R=$best_value at iteration $i.")
         end
+
+        i+=1
     end
+
     println("Final iteration $max_iter, Temperature $current_temp, Best Value $best_value")
-    return missing
+    if best_o_bool
+        return best_solution, best_polytope 
+    else
+        return missing, missing
+    end
 end
 
 
@@ -472,30 +500,37 @@ function neighbor(x, adjacency_list)
 end
 
 
-function objective_steer(x,full_polytope,rho)
-    sub_polytope = vcat([full_polytope[i] for i in 1:length(x) if x[i] == 1],[full_polytope[end+1-i] for i in 1:length(x) if x[i] == 1])
-    R=critical_radius(rho,sub_polytope)
-    if R==0 || sum(x)<2
-        return 1000*length(x)
+function objective_steer(polytope,rho)
+    #is steerable if R_out<1
+    R=critical_radius(rho,polytope)
+    if R==0 
+        return 1000
     end
-    R_out=R/shrinking_factor(sub_polytope)
-    if R_out < 1
-        return 2*sum(x)
+    R_out=R/shrinking_factor(polytope)
+    
+    if R_out<1
+        o_bool=true
     else
-        return 2*length(x)+(R_out-1)
+        o_bool=false
     end
+
+    return R_out, o_bool
 end
 
-function objective_local(x,full_polytope,rho)
-    sub_polytope = vcat([full_polytope[i] for i in 1:length(x) if x[i] == 1],[full_polytope[end+1-i] for i in 1:length(x) if x[i] == 1])
-    R=critical_radius(rho,sub_polytope)
-    if R==0 || sum(x)<2
-        return 1000*length(x)
-    elseif R>=1
-        return 2*sum(x)
-    else
-        return 2*length(x)+(1-R)
+function objective_local(polytope,rho)
+    #Is unsteerable if R>=1
+    R=critical_radius(rho,polytope)
+    if R==0 
+        return 1000
     end
+
+    if R >= 1
+        o_bool = true
+    else
+        o_bool = false
+    end
+
+    return 2-R, o_bool
 end
 
 function OptimizePolytope(rho,polytope, adjacency_list,initial_temp,cooling_rate,max_iter)
@@ -503,22 +538,266 @@ function OptimizePolytope(rho,polytope, adjacency_list,initial_temp,cooling_rate
     outer_radius = inner_radius/shrinking_factor(polytope)
     if outer_radius<1
         local_bool=false
-        best_solution=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope, adjacency_list,rho)
+        best_solution, best_polytope=simulated_annealing(objective_steer, initial_temp, cooling_rate, max_iter,polytope, adjacency_list,rho)
 
     elseif inner_radius>=1
         local_bool=true
-        best_solution=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope, adjacency_list,rho)
+        best_solution, best_polytope=simulated_annealing(objective_local, initial_temp, cooling_rate, max_iter,polytope, adjacency_list,rho)
 
     else
-        return nothing, nothing, missing, inner_radius, outer_radius
+        return nothing, nothing, missing, missing, missing
     end
     if best_solution === missing
         best_polytope = missing
+        new_inner_radius = missing
+        new_outer_radius = missing
+
     else
-        best_polytope = vcat([polytope[i] for i in 1:length(best_solution) if best_solution[i] == 1],[polytope[end+1-i] for i in 1:length(best_solution) if best_solution[i] == 1])
+        new_inner_radius = critical_radius(rho,best_polytope)
+        new_outer_radius = new_inner_radius/shrinking_factor(best_polytope)
     end
-    return best_solution, best_polytope, local_bool,inner_radius,outer_radius
+
+
+    return best_solution, best_polytope, local_bool,new_inner_radius,new_outer_radius
 end
+
+function angles_to_polytope(angles_list)
+    N = length(angles_list)
+    total_vectors = 2 * N  # Total number of vectors after adding opposites
+    unit_vectors = Vector{Vector{Float64}}(undef, total_vectors)
+    
+    # First, convert angles to unit vectors and store them
+    for i in 1:N
+        phi, theta = angles_list[i]
+        
+        # Calculate the Cartesian coordinates
+        x = sin(theta) * cos(phi)
+        y = sin(theta) * sin(phi)
+        z = cos(theta)
+        
+        # Store the unit vector at position i
+        unit_vectors[i] = [x, y, z]
+    end
+    
+    # Then, add the opposites of the vectors
+    for i in 1:N
+        # Get the original vector
+        original_vector = unit_vectors[i]
+        
+        # Compute the opposite vector
+        opposite_vector = -original_vector
+        
+        # Calculate the position for the opposite vector
+        position = N - i + 1
+        
+        # Store the opposite vector at position N + position
+        unit_vectors[N + position] = opposite_vector
+    end
+    
+    return unit_vectors
+end
+
+
+# Function to normalize a tuple
+function normalize_tuple(v::Tuple{Float64, Float64, Float64})
+    norm_v = norm(v)
+    return (v[1] / norm_v, v[2] / norm_v, v[3] / norm_v)
+end
+
+# Function to convert a tuple to a vector
+function tuple_to_vector(v::Tuple{Float64, Float64, Float64})
+    return [v[1], v[2], v[3]]
+end
+
+# Function to generate the vertices of a 10-vertex polytope
+function generate_10_vertex_polytope()
+    num_vertices = 5
+    r = 1.0
+    h = 0.5
+    theta_lower = LinRange(0, 2 * π, num_vertices+1)[1:end-1]  # Equivalent to endpoint=False
+    theta_upper = theta_lower .+ π / num_vertices
+
+    lower_pentagon = [(r * cos(θ), r * sin(θ), -h) for θ in theta_lower]
+    upper_pentagon = [(r * cos(θ), r * sin(θ), h) for θ in theta_upper]
+
+    vertices = vcat(lower_pentagon, upper_pentagon)
+    vertices_normalized = [normalize_tuple(v) for v in vertices]  # Normalize each tuple
+    rotated_vertices = apply_random_rotation(vertices_normalized)
+    return rotated_vertices
+end
+
+# Rodrigues' Rotation Formula
+function rodrigues_rotation(v_tuple, k, θ)
+    v = tuple_to_vector(v_tuple)  # Convert tuple to vector
+    v_rot = v .* cos(θ) .+ cross(k, v) .* sin(θ) .+ k .* dot(k, v) .* (1 - cos(θ))
+    return v_rot
+end
+
+# Apply random rotation to the vertices
+function apply_random_rotation(vertices)
+    # Generate a random unit vector for the rotation axis
+    random_axis = randn(3)
+    random_axis /= norm(random_axis)  # Normalize the axis
+    
+    # Generate a random angle (0 to 2pi)
+    θ = rand(Uniform(0, 2 * π))  # Generate random angle from uniform distribution
+    
+    # Apply Rodrigues' Rotation Formula to each vertex
+    rotated_vertices = [rodrigues_rotation(v, random_axis, θ) for v in vertices]
+    return rotated_vertices
+end
+
+
+function neighborFreevec(current_solution, temperature)
+    # Make a deep copy of the current solution to avoid modifying the original
+    new_solution = deepcopy(current_solution)
+    
+    # Number of elements in the current solution
+    N = length(current_solution)
+    
+    # Randomly pick an index to alter
+    idx = rand(1:N)
+    
+    # Extract the angles to alter
+    phi, theta = new_solution[idx]
+    
+    # Define the maximum possible change in angles based on temperature
+    max_change = temperature^(1/4) * π/4  # Adjust π to control the influence of temperature
+        
+    # Slightly alter the angles based on the temperature
+    delta_phi = (rand() - 0.5) * 2 * max_change
+    delta_theta = (rand() - 0.5) * 2 * max_change
+
+    # Update the angles and ensure they stay within valid ranges
+    phi_new = mod(phi + delta_phi, 2π)
+    theta_new = mod(theta + delta_theta, 2π)
+    
+    # Adjust theta_new to be within [0, π]
+    if theta_new > π
+        theta_new = 2π - theta_new
+    end
+    
+    # Ensure theta_new is non-negative
+    theta_new = max(0, theta_new)
+    
+    # Update the solution with the new angles
+    new_solution[idx] = [phi_new, theta_new]
+    
+    return new_solution
+end
+
+
+# TODO: The stopping criteria should take into account if it has crossed the threshold but not end immediatly, let it improove a little bit more
+function simulated_annealing_freevec(objective, initial_temp, cooling_rate, max_iter,rho)
+    current_solution = [[2π * rand(), acos(2 * rand() - 1)] for _ in 1:4]
+    current_polytope = angles_to_polytope(current_solution)
+
+    current_temp = initial_temp
+    best_solution = current_solution
+
+    # o_bool will signal if the objective function of the polytope is considered a success, either detecting steering or non steering
+    current_value, current_o_bool = objective(current_polytope,rho)
+    best_value = current_value
+    best_o_bool = current_o_bool
+    
+    buffer_iteration=0
+    i=0
+
+    while i + buffer_iteration < max_iter
+        new_solution = neighborFreevec(current_solution,current_temp)
+        new_polytope = angles_to_polytope(new_solution)
+        new_value, new_o_bool = objective(new_polytope, rho)
+        delta = new_value - current_value
+
+        # Metropolis criterion for acceptance
+        if delta < 0 || rand() < exp(-delta / current_temp)
+            current_solution = new_solution
+            current_value = new_value
+            current_polytope=new_polytope
+            current_o_bool = new_o_bool
+        end
+
+        # Update the best solution found so far
+        if current_value < best_value
+            best_solution = copy(current_solution)
+            best_value = current_value
+            best_polytope=current_polytope
+            best_o_bool = current_o_bool
+        end
+
+        # Decrease the temperature according to the cooling schedule
+        current_temp *= cooling_rate
+
+        
+        if best_o_bool && buffer_iteration ==0
+            buffer_iteration = max_iter-i-50
+            println("Threshold value reached R=$best_value at iteration $i.")
+        end
+        i+=1
+    end
+    println("Final iteration $i, Temperature $current_temp, Best Value $best_value, o_bool = $best_o_bool")
+    if best_o_bool
+        return best_solution, best_polytope 
+    else
+        return missing, missing
+    end
+end
+
+
+#TODO: I should add a test with the big polytope to speed things Update
+function OptimizePolytopeFreeVec(rho, polytope, initial_temp, cooling_rate, max_iter)
+
+    inner_radius = critical_radius(rho,polytope)
+    outer_radius = inner_radius/shrinking_factor(polytope)
+
+    if outer_radius<1
+
+        local_bool=false
+        steerable_solution,steerable_polytope=simulated_annealing_freevec(objective_steer, initial_temp, cooling_rate, max_iter,rho)
+        new_inner_radius = missing
+        new_outer_radius = missing
+        if !ismissing(steerable_polytope)
+            new_inner_radius = critical_radius(rho,steerable_polytope)
+            new_outer_radius = inner_radius/shrinking_factor(steerable_polytope)
+        end
+        return steerable_solution, steerable_polytope, local_bool, new_inner_radius, new_outer_radius
+
+    elseif inner_radius>=1
+         
+        local_bool=true
+        unsteerable_solution,unsteerable_polytope=simulated_annealing_freevec(objective_local, initial_temp, cooling_rate, max_iter,rho)
+        new_inner_radius = missing
+        new_outer_radius = missing
+        if !ismissing(steerable_polytope)
+            new_inner_radius = critical_radius(rho,steerable_polytope)
+            new_outer_radius = inner_radius/shrinking_factor(steerable_polytope)
+        end
+        return unsteerable_solution, unsteerable_solution, local_bool, new_inner_radius, new_outer_radius
+
+    else
+        steerable_solution,steerable_polytope=simulated_annealing_freevec(objective_steer, initial_temp, cooling_rate, max_iter,rho)
+        if !ismissing(steerable_polytope)
+            local_bool = false
+            inner_radius = critical_radius(rho,steerable_polytope)
+            outer_radius = inner_radius/shrinking_factor(steerable_polytope)
+
+            return steerable_solution, steerable_polytope, local_bool, inner_radius, outer_radius
+        end
+
+        unsteerable_solution, unsterrable_polytope=simulated_annealing_freevec(objective_local, initial_temp, cooling_rate, max_iter,rho)
+        if !ismissing(unsterrable_polytope)
+            local_bool = true
+            inner_radius = critical_radius(rho,unsterrable_polytope)
+            outer_radius = inner_radius/shrinking_factor(unsterrable_polytope)
+
+            return unsteerable_solution, unsterrable_polytope, local_bool, inner_radius, outer_radius
+        end
+        return missing, missing, missing, missing, missing
+    end
+end
+
+
+
 
 
 function negativity_calc(rho)
