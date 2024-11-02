@@ -11,6 +11,8 @@ The `dataset` folder contains the Julia scripts used to generate the datasets. T
 - **Mother Polytope (`mp`)**: Represents the conclusive polytope as a subpolytope of a larger "mother" polytope. This encoding allows the polytope to be represented as a binary vector.
 - **Free Vectors (`fv`)**: Encodes the conclusive polytope using the angles in polar representation.
 
+You can find my datasets in this google drive [folder](https://drive.google.com/drive/folders/1-1iiPEfsrdmM2qLAyA0uYBEEnlUTaYbw?usp=sharing)
+
 ### Machine Learning Training
 The `ML_training` folder contains the scripts for training the models and tuning hyperparameters. Two different encoding-specific architectures are used:
 
